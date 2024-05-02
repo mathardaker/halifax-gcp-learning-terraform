@@ -1,0 +1,21 @@
+version: 2
+registries:
+  terraform-lbg-cloud-platform-registry:
+    type: terraform-registry
+    url: https://app.terraform.io/app/lbg-cloud-platform
+    token: ${{secrets.TFC_TOKEN}}
+updates:
+- package-ecosystem: terraform
+  directory: /
+  registries:
+  - terraform-lbg-cloud-platform-registry
+  schedule:
+    interval: weekly
+  commit-message:
+    prefix: 'feat(deps): AUTOMATION'
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: weekly
+  ignore:
+  - dependency-name: '*'

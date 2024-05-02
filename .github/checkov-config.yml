@@ -1,0 +1,4 @@
+quiet: true
+soft-fail: true
+skip-check:
+  - CKV2_GHA_1 # Disabling lets us use the default github token.

@@ -1,0 +1,8 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": [
+        "config:base",
+        "github>lbg-cloud-platform/lcp-renovate-action//lcp-default-renovate",
+        "helpers:pinGitHubActionDigests"
+    ]
+}

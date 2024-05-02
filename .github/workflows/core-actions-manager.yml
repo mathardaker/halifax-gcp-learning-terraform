@@ -1,0 +1,115 @@
+name: Github Actions Manager
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # At 00:00 on Sunday.
+  workflow_dispatch:
+    #checkov:skip=CKV_GHA_7:We want user input here
+    inputs:
+      dry-run:
+        type: boolean
+        default: false
+  workflow_call:
+    outputs:
+      changed_files:
+        description: list of changed files
+        value: ${{ jobs.Github-Actions-Manager.outputs.changed_files }}
+    inputs:
+      dry-run:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      GH_APP_CREDENTIALS_TOKEN:
+        required: true
+
+      # Will never be used but need this to please actionlint
+      ACTIONS_MANAGER_PR:
+        required: false
+
+jobs:
+  Github-Actions-Manager:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_files: ${{ steps.output_changes.outputs.changes }}
+
+    steps:
+      # Authenticate using the App as per: https://dev.to/dtinth/authenticating-as-a-github-app-in-a-github-actions-workflow-27co
+      - name: Obtain a GitHub App Installation Access
+        id: githubAppAuth
+        run: |
+          TOKEN="$(npx obtain-github-app-installation-access-token ci ${{ secrets.GH_APP_CREDENTIALS_TOKEN }})"
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Use the obtained token
+        run: |
+          curl -X POST -H 'Content-Type: application/json' \
+            -d '{"context":"test","state":"success"}' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA?access_token=$GITHUB_TOKEN"
+        env:
+          GITHUB_TOKEN: ${{ steps.githubAppAuth.outputs.token }}
+
+      - name: Checkout current repo
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac
+
+      - name: Get latest Actions Manager Repo Releases
+        #checkov:skip=CKV_GHA_3:Not suspicious
+        run: |
+          ACT_MAN_RELEASE=$(curl -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ steps.githubAppAuth.outputs.token }}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" https://api.github.com/repos/lbg-cloud-platform/lcp-github-actions-manager/releases \
+          | jq -r '.[0].tag_name')
+          ACT_MAN_WORKFLOWS_RELEASE=$(curl -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ steps.githubAppAuth.outputs.token }}" -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/lbg-cloud-platform/lcp-github-actions-manager-workflow-packages/releases | jq -r '.[0].tag_name')
+          echo "ACT_MAN_RELEASE=${ACT_MAN_RELEASE}" >> "$GITHUB_ENV"
+          echo "ACT_MAN_WORKFLOWS_RELEASE=${ACT_MAN_WORKFLOWS_RELEASE}" >> "$GITHUB_ENV"
+
+      - name: Checkout Actions Manager Workflow Packages
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac
+        with:
+          repository: lbg-cloud-platform/lcp-github-actions-manager-workflow-packages
+          path: lcp-github-actions-manager-workflow-packages
+          token: ${{ steps.githubAppAuth.outputs.token }}
+          ref: ${{ env.ACT_MAN_WORKFLOWS_RELEASE }}
+
+      - name: Checkout Actions Manager
+        uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac
+        with:
+          repository: lbg-cloud-platform/lcp-github-actions-manager
+          path: lcp-github-actions-manager
+          token: ${{ steps.githubAppAuth.outputs.token }}
+          ref: ${{ env.ACT_MAN_RELEASE }}
+
+      - name: Set Up Python
+        uses: actions/setup-python@61a6322f88396a6271a6ee3565807d608ecaddd1
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Run Github Actions Manager
+        env:
+          GITHUB_TOKEN: ${{ steps.githubAppAuth.outputs.token }}
+        run: |
+          pip install -r lcp-github-actions-manager/actions-manager/requirements.txt
+          python3 lcp-github-actions-manager/actions-manager/actions_manager.py -r ${{ github.repository }}
+
+      - name: Post Actions Manager Clean-up
+        run: |
+          rm -rf lcp-github-actions-manager-workflow-packages/
+          rm -rf lcp-github-actions-manager/
+
+      - name: Create Pull Request
+        if: ${{ ! inputs.dry-run }}
+        uses: lbg-cloud-platform/lcp-create-pull-request@4eae0fcb14d2368393956109818150292dcc9a39
+        with:
+          token: ${{ steps.githubAppAuth.outputs.token }}
+          commit-message: "chore: AUTOMATION Github Actions Manager [skip-ci]"
+          branch: chore/actions-manager
+          delete-branch: true
+          title: "chore: AUTOMATION Github Actions Manager [skip-ci]"
+
+      - name: Output Changes
+        id: output_changes
+        run: |
+          git status -s;
+          echo "changes<<EOF"$'\n'"$(git status -s)"$'\n'EOF >> "$GITHUB_OUTPUT";
